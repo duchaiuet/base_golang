@@ -3,8 +3,6 @@ package config
 import "testing"
 
 func TestLoad(t *testing.T) {
-	t.Parallel()
-
 	t.Setenv("BINANCE_API_KEY", "")
 	t.Setenv("BINANCE_API_SECRET", "")
 	t.Setenv("BINANCE_SYMBOL", "ethusdt")
@@ -48,8 +46,6 @@ func TestLoad(t *testing.T) {
 }
 
 func TestLoadRequiresCredentialsWhenNotDryRun(t *testing.T) {
-	t.Parallel()
-
 	t.Setenv("DRY_RUN", "false")
 	t.Setenv("BINANCE_API_KEY", "")
 	t.Setenv("BINANCE_API_SECRET", "")
