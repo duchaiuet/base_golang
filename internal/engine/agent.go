@@ -81,20 +81,12 @@ func (a *Agent) Tick(ctx context.Context) error {
 		prices = append(prices, k.Close)
 	}
 
-	signal, err := strategy.SMA(prices, a.cfg.FastWindow, a.cfg.SlowWindow, a.cfg.MinSignalDelta)
+	signal, err := a.computeSignal(prices)
 	if err != nil {
 		return fmt.Errorf("compute signal: %w", err)
 	}
 
-	a.logger.Printf(
-		"signal=%s last_price=%.6f fast_sma=%.6f slow_sma=%.6f delta=%.6f position=%s",
-		signal.Decision,
-		signal.LastPrice,
-		signal.FastSMA,
-		signal.SlowSMA,
-		signal.Delta,
-		a.position,
-	)
+	a.logSignal(signal)
 
 	switch signal.Decision {
 	case strategy.DecisionBuy:
@@ -111,6 +103,46 @@ func (a *Agent) Tick(ctx context.Context) error {
 		return a.executeOrder(ctx, binance.SideSell)
 	default:
 		return nil
+	}
+}
+
+func (a *Agent) computeSignal(prices []float64) (strategy.Signal, error) {
+	switch a.cfg.StrategyMode {
+	case config.StrategySMA:
+		return strategy.SMA(prices, a.cfg.FastWindow, a.cfg.SlowWindow, a.cfg.MinSignalDelta)
+	case config.StrategyPredictive:
+		return strategy.Predictive(prices, a.cfg.PredictTrainWindow, a.cfg.MinSignalDelta)
+	default:
+		return strategy.Signal{}, fmt.Errorf("unsupported strategy mode %q", a.cfg.StrategyMode)
+	}
+}
+
+func (a *Agent) logSignal(signal strategy.Signal) {
+	switch a.cfg.StrategyMode {
+	case config.StrategyPredictive:
+		a.logger.Printf(
+			"strategy=%s signal=%s last_price=%.6f predicted_return=%.6f threshold=%.6f confidence=%.4f mae=%.6f samples=%d position=%s",
+			a.cfg.StrategyMode,
+			signal.Decision,
+			signal.LastPrice,
+			signal.PredictedReturn,
+			a.cfg.MinSignalDelta,
+			signal.ModelConfidence,
+			signal.TrainingMeanAbsE,
+			signal.TrainingSamples,
+			a.position,
+		)
+	default:
+		a.logger.Printf(
+			"strategy=%s signal=%s last_price=%.6f fast_sma=%.6f slow_sma=%.6f delta=%.6f position=%s",
+			a.cfg.StrategyMode,
+			signal.Decision,
+			signal.LastPrice,
+			signal.FastSMA,
+			signal.SlowSMA,
+			signal.Delta,
+			a.position,
+		)
 	}
 }
 

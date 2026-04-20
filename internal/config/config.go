@@ -13,39 +13,51 @@ const (
 	defaultTestnetBaseURL = "https://testnet.binance.vision"
 )
 
+// StrategyMode selects which decision engine to use.
+type StrategyMode string
+
+const (
+	StrategyPredictive StrategyMode = "predictive"
+	StrategySMA        StrategyMode = "sma"
+)
+
 // Config stores runtime parameters for the trading agent.
 type Config struct {
-	APIKey           string
-	APISecret        string
-	BaseURL          string
-	Symbol           string
-	Interval         string
-	PollInterval     time.Duration
-	FastWindow       int
-	SlowWindow       int
-	MinSignalDelta   float64
-	QuoteOrderAmount float64
-	KlineLimit       int
-	RequestTimeout   time.Duration
-	DryRun           bool
-	UseTestnet       bool
+	APIKey             string
+	APISecret          string
+	BaseURL            string
+	Symbol             string
+	Interval           string
+	StrategyMode       StrategyMode
+	PollInterval       time.Duration
+	FastWindow         int
+	SlowWindow         int
+	PredictTrainWindow int
+	MinSignalDelta     float64
+	QuoteOrderAmount   float64
+	KlineLimit         int
+	RequestTimeout     time.Duration
+	DryRun             bool
+	UseTestnet         bool
 }
 
 // Load reads configuration from environment variables.
 func Load() (Config, error) {
 	cfg := Config{
-		APIKey:           strings.TrimSpace(os.Getenv("BINANCE_API_KEY")),
-		APISecret:        strings.TrimSpace(os.Getenv("BINANCE_API_SECRET")),
-		Symbol:           strings.ToUpper(envOrDefault("BINANCE_SYMBOL", "BTCUSDT")),
-		Interval:         envOrDefault("BINANCE_INTERVAL", "1m"),
-		PollInterval:     30 * time.Second,
-		FastWindow:       7,
-		SlowWindow:       25,
-		MinSignalDelta:   0.001,
-		QuoteOrderAmount: 25,
-		RequestTimeout:   10 * time.Second,
-		DryRun:           true,
-		UseTestnet:       true,
+		APIKey:             strings.TrimSpace(os.Getenv("BINANCE_API_KEY")),
+		APISecret:          strings.TrimSpace(os.Getenv("BINANCE_API_SECRET")),
+		Symbol:             strings.ToUpper(envOrDefault("BINANCE_SYMBOL", "BTCUSDT")),
+		Interval:           envOrDefault("BINANCE_INTERVAL", "1m"),
+		StrategyMode:       StrategyPredictive,
+		PollInterval:       30 * time.Second,
+		FastWindow:         7,
+		SlowWindow:         25,
+		PredictTrainWindow: 120,
+		MinSignalDelta:     0.001,
+		QuoteOrderAmount:   25,
+		RequestTimeout:     10 * time.Second,
+		DryRun:             true,
+		UseTestnet:         true,
 	}
 
 	var err error
@@ -54,11 +66,16 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	cfg.StrategyMode = StrategyMode(strings.ToLower(envOrDefault("STRATEGY_MODE", string(cfg.StrategyMode))))
 	cfg.FastWindow, err = intFromEnv("FAST_WINDOW", cfg.FastWindow)
 	if err != nil {
 		return Config{}, err
 	}
 	cfg.SlowWindow, err = intFromEnv("SLOW_WINDOW", cfg.SlowWindow)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.PredictTrainWindow, err = intFromEnv("PREDICT_TRAIN_WINDOW", cfg.PredictTrainWindow)
 	if err != nil {
 		return Config{}, err
 	}
@@ -83,7 +100,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	cfg.KlineLimit, err = intFromEnv("KLINE_LIMIT", cfg.SlowWindow+5)
+	defaultKlineLimit := cfg.SlowWindow + 5
+	if cfg.StrategyMode == StrategyPredictive {
+		defaultKlineLimit = cfg.PredictTrainWindow + 6
+	}
+	cfg.KlineLimit, err = intFromEnv("KLINE_LIMIT", defaultKlineLimit)
 	if err != nil {
 		return Config{}, err
 	}
@@ -107,12 +128,14 @@ func Load() (Config, error) {
 func (c Config) RedactedSummary() string {
 	keySet := c.APIKey != "" && c.APISecret != ""
 	return fmt.Sprintf(
-		"symbol=%s interval=%s poll=%s fast=%d slow=%d delta=%.4f quote_amount=%.4f dry_run=%t testnet=%t auth=%t base_url=%s",
+		"symbol=%s interval=%s strategy=%s poll=%s fast=%d slow=%d train=%d delta=%.4f quote_amount=%.4f dry_run=%t testnet=%t auth=%t base_url=%s",
 		c.Symbol,
 		c.Interval,
+		c.StrategyMode,
 		c.PollInterval,
 		c.FastWindow,
 		c.SlowWindow,
+		c.PredictTrainWindow,
 		c.MinSignalDelta,
 		c.QuoteOrderAmount,
 		c.DryRun,
@@ -132,11 +155,20 @@ func (c Config) validate() error {
 	if c.PollInterval <= 0 {
 		return fmt.Errorf("POLL_INTERVAL must be greater than zero")
 	}
-	if c.FastWindow < 2 {
-		return fmt.Errorf("FAST_WINDOW must be at least 2")
-	}
-	if c.SlowWindow <= c.FastWindow {
-		return fmt.Errorf("SLOW_WINDOW must be greater than FAST_WINDOW")
+	switch c.StrategyMode {
+	case StrategySMA:
+		if c.FastWindow < 2 {
+			return fmt.Errorf("FAST_WINDOW must be at least 2 for STRATEGY_MODE=sma")
+		}
+		if c.SlowWindow <= c.FastWindow {
+			return fmt.Errorf("SLOW_WINDOW must be greater than FAST_WINDOW for STRATEGY_MODE=sma")
+		}
+	case StrategyPredictive:
+		if c.PredictTrainWindow < 5 {
+			return fmt.Errorf("PREDICT_TRAIN_WINDOW must be at least 5 for STRATEGY_MODE=predictive")
+		}
+	default:
+		return fmt.Errorf("STRATEGY_MODE must be one of: %s, %s", StrategyPredictive, StrategySMA)
 	}
 	if c.MinSignalDelta < 0 {
 		return fmt.Errorf("MIN_SIGNAL_DELTA must be non-negative")
@@ -144,8 +176,15 @@ func (c Config) validate() error {
 	if c.QuoteOrderAmount <= 0 {
 		return fmt.Errorf("QUOTE_ORDER_AMOUNT must be greater than zero")
 	}
-	if c.KlineLimit < c.SlowWindow {
-		return fmt.Errorf("KLINE_LIMIT must be >= SLOW_WINDOW")
+	switch c.StrategyMode {
+	case StrategySMA:
+		if c.KlineLimit < c.SlowWindow {
+			return fmt.Errorf("KLINE_LIMIT must be >= SLOW_WINDOW for STRATEGY_MODE=sma")
+		}
+	case StrategyPredictive:
+		if c.KlineLimit < c.PredictTrainWindow+4 {
+			return fmt.Errorf("KLINE_LIMIT must be >= PREDICT_TRAIN_WINDOW + 4 for STRATEGY_MODE=predictive")
+		}
 	}
 	if c.RequestTimeout <= 0 {
 		return fmt.Errorf("REQUEST_TIMEOUT must be greater than zero")

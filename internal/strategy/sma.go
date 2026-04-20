@@ -16,11 +16,15 @@ const (
 
 // Signal contains the strategy output and supporting values.
 type Signal struct {
-	Decision  Decision
-	FastSMA   float64
-	SlowSMA   float64
-	Delta     float64
-	LastPrice float64
+	Decision         Decision
+	FastSMA          float64
+	SlowSMA          float64
+	Delta            float64
+	LastPrice        float64
+	PredictedReturn  float64
+	ModelConfidence  float64
+	TrainingSamples  int
+	TrainingMeanAbsE float64
 }
 
 // SMA computes buy/sell/hold using fast and slow simple moving averages.

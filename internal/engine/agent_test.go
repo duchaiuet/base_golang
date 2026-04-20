@@ -165,18 +165,20 @@ func TestTickDryRunUpdatesPositionWithoutPlacingOrder(t *testing.T) {
 
 func testConfig(dryRun bool) config.Config {
 	return config.Config{
-		Symbol:           "BTCUSDT",
-		Interval:         "1m",
-		PollInterval:     5 * time.Second,
-		FastWindow:       2,
-		SlowWindow:       4,
-		MinSignalDelta:   0.005,
-		QuoteOrderAmount: 25,
-		KlineLimit:       6,
-		RequestTimeout:   5 * time.Second,
-		DryRun:           dryRun,
-		UseTestnet:       true,
-		BaseURL:          "https://testnet.binance.vision",
+		Symbol:             "BTCUSDT",
+		Interval:           "1m",
+		StrategyMode:       config.StrategySMA,
+		PollInterval:       5 * time.Second,
+		FastWindow:         2,
+		SlowWindow:         4,
+		PredictTrainWindow: 10,
+		MinSignalDelta:     0.005,
+		QuoteOrderAmount:   25,
+		KlineLimit:         6,
+		RequestTimeout:     5 * time.Second,
+		DryRun:             dryRun,
+		UseTestnet:         true,
+		BaseURL:            "https://testnet.binance.vision",
 	}
 }
 

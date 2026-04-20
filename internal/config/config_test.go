@@ -7,6 +7,7 @@ func TestLoad(t *testing.T) {
 	t.Setenv("BINANCE_API_SECRET", "")
 	t.Setenv("BINANCE_SYMBOL", "ethusdt")
 	t.Setenv("BINANCE_INTERVAL", "5m")
+	t.Setenv("STRATEGY_MODE", "sma")
 	t.Setenv("POLL_INTERVAL", "15s")
 	t.Setenv("FAST_WINDOW", "5")
 	t.Setenv("SLOW_WINDOW", "15")
@@ -43,6 +44,9 @@ func TestLoad(t *testing.T) {
 	if got, want := cfg.BaseURL, defaultSpotBaseURL; got != want {
 		t.Fatalf("unexpected base URL: got %s want %s", got, want)
 	}
+	if got, want := cfg.StrategyMode, StrategySMA; got != want {
+		t.Fatalf("unexpected strategy mode: got %s want %s", got, want)
+	}
 }
 
 func TestLoadRequiresCredentialsWhenNotDryRun(t *testing.T) {
@@ -55,5 +59,35 @@ func TestLoadRequiresCredentialsWhenNotDryRun(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatalf("expected credential validation error, got nil")
+	}
+}
+
+func TestLoadPredictiveModeDefaultsKlineLimit(t *testing.T) {
+	t.Setenv("STRATEGY_MODE", "predictive")
+	t.Setenv("PREDICT_TRAIN_WINDOW", "30")
+	t.Setenv("KLINE_LIMIT", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got, want := cfg.StrategyMode, StrategyPredictive; got != want {
+		t.Fatalf("unexpected strategy mode: got %s want %s", got, want)
+	}
+	if got, want := cfg.PredictTrainWindow, 30; got != want {
+		t.Fatalf("unexpected train window: got %d want %d", got, want)
+	}
+	if got, want := cfg.KlineLimit, 36; got != want {
+		t.Fatalf("unexpected kline limit: got %d want %d", got, want)
+	}
+}
+
+func TestLoadRejectsInvalidStrategyMode(t *testing.T) {
+	t.Setenv("STRATEGY_MODE", "random-forest")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatalf("expected strategy mode validation error, got nil")
 	}
 }
